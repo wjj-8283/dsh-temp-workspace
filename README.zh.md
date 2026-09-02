@@ -16,6 +16,25 @@
 
 ## 安装方式
 
+### 从 npm 安装（预构建，推荐）
+
+该包已发布到 npm，`lib/` **为预构建产物**，安装无需构建、可跳过 pnpm 的 `allowBuilds` 授权——一条命令搞定：
+
+```sh
+dsh plugin --profile web add @dsh-dev/dsh-temp-workspace
+```
+
+`dsh plugin … add` 会把该 spec 转发给 profile 目录里的 pnpm，并代为合并 `dsh.profile.bundles`。因为清单声明了 `dsh.bundle.patch`，包会自动加入 Loader 层栈，下次启动 `dsh web` 时宿主把它组合为 Loader 条目、注册 `/temp-workspace/api` 路由、设置卡片进入 `__DSH_BOOT__`。
+
+改动后重新发布（需要拥有 `@dsh-dev` scope 的 npm 账号）：
+
+```sh
+npm login                # 一次即可
+npm publish               # prepublishOnly 会从 src 重新生成 lib/client.js
+```
+
+### 从 GitHub 安装
+
 直接从 GitHub 安装，使用 `dsh plugin` 转发器（在 profile 目录里 pnpm clone + `add`，并自动合并 bundle 层）：
 
 ```sh
@@ -23,7 +42,7 @@
 dsh plugin --profile web add github:wjj-8283/dsh-temp-workspace
 ```
 
-这会把它作为 `@dsh-dev/dsh-temp-workspace` 安装。因为清单声明了 `dsh.bundle.patch`，add 会把该包自动追加到 `dsh.profile.bundles`，下次启动 `dsh web` 时宿主就把它组合为 Loader 条目、注册 `/temp-workspace/api` 路由、设置卡片进入 `__DSH_BOOT__`。
+因为清单声明了 `dsh.bundle.patch`，add 会把该包自动追加到 `dsh.profile.bundles`，下次启动 `dsh web` 时宿主就把它组合为 Loader 条目、注册 `/temp-workspace/api` 路由、设置卡片进入 `__DSH_BOOT__`。
 
 若想自己驱动 pnpm，可在 profile 目录里执行同一 spec：
 
