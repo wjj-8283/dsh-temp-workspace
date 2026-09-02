@@ -1,4 +1,4 @@
-# @dsh-dev/dsh-temp-workspace
+# @wjj-8283/dsh-temp-workspace
 
 一个 DSH web **客户端插件**，提供 **临时工作区（临时工作区）** 功能。
 
@@ -21,7 +21,7 @@
 该包已发布到 npm，`lib/` **为预构建产物**，安装无需构建、可跳过 pnpm 的 `allowBuilds` 授权——一条命令搞定：
 
 ```sh
-dsh plugin --profile web add @dsh-dev/dsh-temp-workspace
+dsh plugin --profile web add @wjj-8283/dsh-temp-workspace
 ```
 
 `dsh plugin … add` 会把该 spec 转发给 profile 目录里的 pnpm，并代为合并 `dsh.profile.bundles`。因为清单声明了 `dsh.bundle.patch`，包会自动加入 Loader 层栈，下次启动 `dsh web` 时宿主把它组合为 Loader 条目、注册 `/temp-workspace/api` 路由、设置卡片进入 `__DSH_BOOT__`。

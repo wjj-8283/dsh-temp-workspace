@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Build the client browser bundle for @dsh-dev/dsh-temp-workspace.
+// Build the client browser bundle for @wjj-8283/dsh-temp-workspace.
 //
 // The DSH web shell serves a plugin's browser half from the file that its
 // package.json `exports["./client"]` resolves to, and expects it to be a

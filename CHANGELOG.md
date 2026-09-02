@@ -13,7 +13,7 @@ All notable changes to this project are documented in this file.
   migrated (followed by a real host-level restart to re-index).
 - Settings → Plugins card (`dsh-temp-workspace`) with `deleteMode`,
   `deleteDelay` and `confirmBeforeDelete`.
-- npm prebuilt install (`@dsh-dev/dsh-temp-workspace`) so users get a
+- npm prebuilt install (`@wjj-8283/dsh-temp-workspace`) so users get a
   one-command install that skips the `allowBuilds` build-approval step.
 
 ### Changed

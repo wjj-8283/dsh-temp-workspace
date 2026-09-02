@@ -1,4 +1,4 @@
-# @dsh-dev/dsh-temp-workspace
+# @wjj-8283/dsh-temp-workspace
 
 A DSH web **client plugin** that adds a **temporary workspace**.
 
@@ -29,7 +29,7 @@ The package is published to npm with `lib/` **prebuilt**, so installing it
 needs no build and skips pnpm's `allowBuilds` approval — a single command:
 
 ```sh
-dsh plugin --profile web add @dsh-dev/dsh-temp-workspace
+dsh plugin --profile web add @wjj-8283/dsh-temp-workspace
 ```
 
 `dsh plugin … add` forwards the spec to pnpm inside the profile dir, then
