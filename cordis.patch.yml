@@ -1,4 +1,4 @@
-# @dsh-dev/dsh-temp-workspace — bundle patch.
+# @wjj-8283/dsh-temp-workspace — bundle patch.
 #
 # Inserts this plugin as a host Loader entry. The host half injects webServer /
 # webRuntime / workspaceRegistry / sessionPersistence and registers a fenced
@@ -9,4 +9,4 @@
 # creates a temporary workspace and opens a new conversation in it.
 - insert:
     - id: dsh-temp-workspace
-      name: '@dsh-dev/dsh-temp-workspace'
+      name: '@wjj-8283/dsh-temp-workspace'

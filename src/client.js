@@ -1,4 +1,4 @@
-// @dsh-dev/dsh-temp-workspace — browser half SOURCE (editable).
+// @wjj-8283/dsh-temp-workspace — browser half SOURCE (editable).
 //
 // Three responsibilities:
 //   1. Inject a small icon button beside the sidebar's "Add workspace" (+)
