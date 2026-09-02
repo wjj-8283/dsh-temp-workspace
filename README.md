@@ -23,6 +23,31 @@ workspace **and the workspace itself** — the temp workspace leaves no trace.
 
 ## Installation
 
+### From npm (prebuilt — recommended)
+
+The package is published to npm with `lib/` **prebuilt**, so installing it
+needs no build and skips pnpm's `allowBuilds` approval — a single command:
+
+```sh
+dsh plugin --profile web add @dsh-dev/dsh-temp-workspace
+```
+
+`dsh plugin … add` forwards the spec to pnpm inside the profile dir, then
+reconciles `dsh.profile.bundles` for you. Because the manifest declares
+`dsh.bundle.patch`, the package auto-joins the Loader layer stack, so on the
+next `dsh web` start the host composes the plugin as a Loader entry, registers
+the `/temp-workspace/api` route, and the settings card enters `__DSH_BOOT__`.
+
+To republish after a change (requires an npm account that owns the
+`@dsh-dev` scope):
+
+```sh
+npm login                # one-time
+npm publish               # prepublishOnly rebuilds lib/client.js from src
+```
+
+### From GitHub
+
 Install it straight from GitHub with the `dsh plugin` forwarder (pnpm clone +
 `add` inside the profile dir, then the bundle layer is reconciled for you):
 
@@ -31,11 +56,10 @@ Install it straight from GitHub with the `dsh plugin` forwarder (pnpm clone +
 dsh plugin --profile web add github:wjj-8283/dsh-temp-workspace
 ```
 
-This installs the package as `@dsh-dev/dsh-temp-workspace`. Because the
-manifest declares `dsh.bundle.patch`, the add step auto-appends the package to
-`dsh.profile.bundles`, so on the next `dsh web` start the host composes the
-plugin as a Loader entry, registers the `/temp-workspace/api` route, and the
-settings card enters `__DSH_BOOT__`.
+Because the manifest declares `dsh.bundle.patch`, the add step auto-appends
+the package to `dsh.profile.bundles`, so on the next `dsh web` start the host
+composes the plugin as a Loader entry, registers the `/temp-workspace/api`
+route, and the settings card enters `__DSH_BOOT__`.
 
 If you prefer to drive pnpm yourself, run the same spec from inside the profile
 directory:
