@@ -1,9 +1,30 @@
 {
   "name": "@dsh-dev/dsh-temp-workspace",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
   "description": "DSH web client plugin: a temporary workspace (临时工作区) — every conversation it contains is deleted at the next Harness restart (immediately or after a delay), optionally behind a confirm dialog. Adds a small icon beside the sidebar's \"Add workspace\" button and a Settings -> Plugins card.",
   "type": "module",
+  "license": "MIT",
+  "author": "wjj-8283 <wlw20070926@outlook.com>",
+  "homepage": "https://github.com/wjj-8283/dsh-temp-workspace",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wjj-8283/dsh-temp-workspace.git"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "deepseek",
+    "harness-plugin",
+    "workspace",
+    "temporary-workspace",
+    "temp-workspace",
+    "session",
+    "cleanup"
+  ],
+  "engines": {
+    "node": ">=22.19"
+  },
   "exports": {
     ".": "./lib/index.js",
     "./client": "./lib/client.js",
