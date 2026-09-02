@@ -1,0 +1,12 @@
+# @dsh-dev/dsh-temp-workspace — bundle patch.
+#
+# Inserts this plugin as a host Loader entry. The host half injects webServer /
+# webRuntime / workspaceRegistry / sessionPersistence and registers a fenced
+# /temp-workspace/api route (create + delete + list) plus a boot cleanup pass
+# that removes every workspace recorded as temporary (sessions first, then the
+# registration, then the throwaway directory). The client half (dsh.client)
+# injects a small icon beside the sidebar's "Add workspace" button; clicking it
+# creates a temporary workspace and opens a new conversation in it.
+- insert:
+    - id: dsh-temp-workspace
+      name: '@dsh-dev/dsh-temp-workspace'
