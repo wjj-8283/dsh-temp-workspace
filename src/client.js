@@ -28,6 +28,10 @@ const react = require('react')
 const reactDOMClient = require('react-dom/client')
 
 const SETTINGS_NS = 'dsh-temp-workspace'
+// The npm package name the Plugin Manager keys a bundle's own configuration by,
+// and the row id its bundle patch declares (`<package>#<rowId>` for a row page).
+const PACKAGE_NAME = '@wjj-8283/dsh-temp-workspace'
+const PLUGIN_ROW_ID = 'dsh-temp-workspace'
 
 const ICON_SVG =
   '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block;flex:none">' +
@@ -488,8 +492,15 @@ function apply(ctx) {
   // card). It manages state directly rather than through the tab's inject face.
   const SETTINGS_LIMIT = 24 * 3600 // max delay seconds (24h)
 
-  function SettingsCard() {
-    const [open, setOpen] = react.useState(false)
+  /**
+   * The plugin's settings form in two presentations:
+   *   - default: a collapsible card inside Settings → Plugins;
+   *   - `page: true`: the fields alone, filling the plugin's own page in the
+   *     Plugin Manager (sidebar → Plugins → this plugin).
+   */
+  function SettingsCard(props) {
+    const page = props !== null && typeof props === 'object' && props.page === true
+    const [open, setOpen] = react.useState(page)
     const [state, setState] = react.useState({
       deleteMode: 'immediate',
       deleteDelay: 3600,
@@ -577,13 +588,7 @@ function apply(ctx) {
         .catch(() => setState((current) => ({ ...current, saving: false, status: localeText('saveFail', 'Save failed') })))
     }
 
-    return react.createElement('div', { className: cardCss },
-      react.createElement('button', { type: 'button', className: headCss, onClick: () => setOpen((value) => !value) },
-        react.createElement('span', { className: headTextCss },
-          react.createElement('span', { className: nameCss }, localeText('name', 'Temporary Workspace')),
-          react.createElement('span', { className: descCss }, localeText('desc', 'When and whether temp workspaces are deleted after a restart'))),
-        react.createElement('span', { className: chevronCss + (open ? ' ' + chevronOpenCss : '') }, '▾')),
-      open ? react.createElement('div', { className: bodyCss },
+    const fields = react.createElement('div', { className: bodyCss },
         react.createElement('fieldset', { className: fieldsetCss },
           react.createElement('legend', { className: labelCss }, localeText('deleteModeLabel', 'Delete after restart')),
           react.createElement('label', { className: radioCss },
@@ -623,10 +628,44 @@ function apply(ctx) {
           react.createElement('button', { type: 'button', className: btnCss, disabled: busy || !valid, onClick: () => update({ deleteMode: state.deleteMode, deleteDelay: state.deleteDelay, confirmBeforeDelete: state.confirmBeforeDelete, tempRoot: state.tempRoot }, localeText('saved', 'Saved')) }, localeText('save', 'Save')),
           react.createElement('button', { type: 'button', className: btnCss, disabled: busy, onClick: reset }, localeText('reset', 'Restore defaults'))),
         state.status ? react.createElement('div', { className: statusCss }, state.status) : null)
-      : null)
+
+    if (page) return fields
+    return react.createElement('div', { className: cardCss },
+      react.createElement('button', { type: 'button', className: headCss, onClick: () => setOpen((value) => !value) },
+        react.createElement('span', { className: headTextCss },
+          react.createElement('span', { className: nameCss }, localeText('name', 'Temporary Workspace')),
+          react.createElement('span', { className: descCss }, localeText('desc', 'When and whether temp workspaces are deleted after a restart'))),
+        react.createElement('span', { className: chevronCss + (open ? ' ' + chevronOpenCss : '') }, '▾')),
+      open ? fields : null)
+  }
+
+  /**
+   * The Plugin Manager's configuration view for this bundle. The page asks for
+   * `view: 'summary'` in list rows (the one-line description) and
+   * `view: 'page'` on the plugin's own page, where the full settings form goes —
+   * this is what puts the configuration items inside the plugin's page.
+   */
+  function PluginConfigView(props) {
+    const view = props !== null && typeof props === 'object' ? props.view : undefined
+    if (view === 'summary') {
+      return react.createElement('span', null, localeText('desc', 'When and whether temp workspaces are deleted after a restart'))
+    }
+    return react.createElement(SettingsCard, { page: true })
   }
 
   if (slots) {
+    // dsh 0.2.x Plugin Manager (sidebar → Plugins): a bundle's own settings
+    // belong in `plugins.bundle.config` keyed by the package name, and the
+    // row's settings in `plugins.row.config` keyed by `<package>#<rowId>`.
+    // Registering them is what gives the plugin's page a configuration body.
+    ctx.effect(() => slots.inject('plugins.bundle.config', () => slots.register({
+      name: 'plugins.bundle.config',
+      key: PACKAGE_NAME,
+    }, PluginConfigView)), 'dsh-temp-workspace: plugin page configuration')
+    ctx.effect(() => slots.inject('plugins.row.config', () => slots.register({
+      name: 'plugins.row.config',
+      key: `${PACKAGE_NAME}#${PLUGIN_ROW_ID}`,
+    }, PluginConfigView)), 'dsh-temp-workspace: plugin row configuration')
     // dsh 0.2.x renders plugin-owned Settings content as tabs declared by the
     // Plugins settings section (`settings.plugins.tab`, a list slot).
     ctx.effect(() => slots.inject('settings.plugins.tab', () => slots.register({

@@ -54,7 +54,9 @@ dsh plugin --profile web add github:wjj-8283/dsh-temp-workspace#<ref>
 
 ## 设置 → 插件
 
-插件在 **设置 → 插件** 注册一张卡片（以设置命名空间 `dsh-temp-workspace` 为键，
+配置项会出现在两个地方：**插件页面**（侧边栏「插件」→ 点进本插件；通过
+`plugins.bundle.config` / `plugins.row.config` 槽位贡献），以及
+**设置 → 插件** 里的标签页/卡片（以设置命名空间 `dsh-temp-workspace` 为键，
 持久化在 `~/.dsh/settings.yaml`）：
 
 | 设置 | 取值 | 默认 | 含义 |

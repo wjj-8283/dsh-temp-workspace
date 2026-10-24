@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.1.4] - 2026
+
+### Changed
+- The configuration now also lives inside the plugin's own page in the Plugin
+  Manager (sidebar → Plugins → this plugin): the same settings form is
+  registered into the 0.2.x `plugins.bundle.config` (keyed by the package name)
+  and `plugins.row.config` (keyed by `<package>#<rowId>`) slots, with a one-line
+  summary where the page lists rows. Settings → Plugins keeps the tab too.
+
 ## [0.1.3] - 2026
 
 ### Added
