@@ -12,8 +12,8 @@ workspace **and the workspace itself** — the temp workspace leaves no trace.
 ## What it is
 
 - **Host half** (`lib/index.js`) — a Cordis plugin that injects
-  `webServer` / `webRuntime` / `workspaceRegistry` / `sessionPersistence`,
-  `settings` and `loader`, registers a browser-trust-fenced
+  `webServer` / `workspaceRegistry` / `sessionPersistence` (and reads the host's
+  `connection` trust gate lazily), registers a browser-trust-fenced
   `/temp-workspace/api` route, and drives the cleanup at boot.
 - **Browser half** (`src/client.js` → `lib/client.js`) — injects a small icon
   button beside the sidebar "+ Add workspace" button; on click it calls the

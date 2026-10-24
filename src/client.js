@@ -54,6 +54,13 @@ const inject = ['workspaces', 'slots', 'locale']
 
 function apply(ctx) {
   const workspaces = ctx.get ? ctx.get('workspaces') : ctx.workspaces
+  // dsh 0.2.x moved session navigation (startSession / pickDirectory) from the
+  // workspace controller to the ui-workspace navigation service. Read lazily:
+  // that service mounts alongside the shell, after this plugin's apply().
+  const uiWorkspace = () => {
+    const nav = typeof ctx.get === 'function' ? ctx.get('uiWorkspace') : undefined
+    return nav ?? ctx.uiWorkspace
+  }
   const slots = ctx.get ? ctx.get('slots') : ctx.slots
   const locale = ctx.get ? ctx.get('locale') : ctx.locale
 
@@ -81,6 +88,42 @@ function apply(ctx) {
   let inserting = false
   let scheduled = null
 
+  /** Open a New Session in a workspace: ui-workspace (0.2.x) then the legacy face. */
+  function openWorkspaceSession(workspaceId) {
+    const nav = uiWorkspace()
+    if (nav !== undefined && typeof nav.startSession === 'function') {
+      nav.startSession(workspaceId)
+      return true
+    }
+    if (workspaces && typeof workspaces.startSession === 'function') {
+      workspaces.startSession(workspaceId)
+      return true
+    }
+    return false
+  }
+
+  /**
+   * Wait up to `timeoutMs` for the workspace controller's feed to publish a
+   * Workspace row. The plugin's create route mutates the host registry directly,
+   * so the client model learns about the new row asynchronously; starting a
+   * session before it lands would resolve against the previous workspace.
+   */
+  async function awaitWorkspaceVisible(workspaceId, timeoutMs) {
+    const source = workspaces && workspaces.list
+    if (!source || typeof source.getSnapshot !== 'function') return
+    const deadline = Date.now() + timeoutMs
+    for (;;) {
+      let items = []
+      try {
+        const snapshot = source.getSnapshot()
+        items = snapshot !== null && typeof snapshot === 'object' && Array.isArray(snapshot.items) ? snapshot.items : []
+      } catch { /* model not ready — keep waiting */ }
+      if (items.some((row) => row !== null && (row.workspaceId === workspaceId || row.id === workspaceId))) return
+      if (Date.now() >= deadline) return
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+  }
+
   async function createTempWorkspace() {
     try {
       const res = await fetch('/temp-workspace/api/create', {
@@ -99,7 +142,10 @@ function apply(ctx) {
       if (workspaces && typeof workspaces.refresh === 'function') {
         await workspaces.refresh()
       }
-      if (workspaces) workspaces.startSession(workspace.workspaceId)
+      await awaitWorkspaceVisible(workspace.workspaceId, 1500)
+      if (!openWorkspaceSession(workspace.workspaceId)) {
+        console.error('[temp-workspace] created the workspace but no session navigation service is available')
+      }
     } catch (error) {
       console.error('[temp-workspace] create failed', error)
     }
@@ -368,12 +414,16 @@ function apply(ctx) {
   // Permanent keep for one temp workspace: pick the destination folder, then ask
   // the host to move that workspace's files in and de-temp it.
   const doPermanentKeep = async (workspaceId) => {
-    if (!workspaces || typeof workspaces.pickDirectory !== 'function') {
+    const nav = uiWorkspace()
+    const pick = nav !== undefined && typeof nav.pickDirectory === 'function'
+      ? nav.pickDirectory.bind(nav)
+      : (workspaces && typeof workspaces.pickDirectory === 'function' ? workspaces.pickDirectory.bind(workspaces) : undefined)
+    if (pick === undefined) {
       console.error('[temp-workspace] pickDirectory unavailable')
       return
     }
     try {
-      const target = await workspaces.pickDirectory()
+      const target = await pick()
       if (target === null || target === undefined || target === '') return
       const payload = workspaceId !== undefined ? { target, workspaceId } : { target }
       const ok = await post('/temp-workspace/api/permanentKeep', payload)
@@ -562,6 +612,16 @@ function apply(ctx) {
   }
 
   if (slots) {
+    // dsh 0.2.x renders plugin-owned Settings content as tabs declared by the
+    // Plugins settings section (`settings.plugins.tab`, a list slot).
+    ctx.effect(() => slots.inject('settings.plugins.tab', () => slots.register({
+      name: 'settings.plugins.tab',
+      id: SETTINGS_NS,
+      order: 50,
+      label: () => localeText('name', 'Temporary Workspace'),
+    }, SettingsCard)), 'dsh-temp-workspace: settings tab')
+    // dsh 0.1.x's per-plugin item slot. Never declared on 0.2.x, so this
+    // callback simply stays dormant there and the tab above is used instead.
     ctx.effect(() => slots.inject('settings.plugin.item', () => slots.register({
       name: 'settings.plugin.item',
       key: SETTINGS_NS,
