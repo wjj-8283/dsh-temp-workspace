@@ -12,8 +12,8 @@ workspace **and the workspace itself** — the temp workspace leaves no trace.
 ## What it is
 
 - **Host half** (`lib/index.js`) — a Cordis plugin that injects
-  `webServer` / `webRuntime` / `workspaceRegistry` / `sessionPersistence`,
-  `settings` and `loader`, registers a browser-trust-fenced
+  `webServer` / `workspaceRegistry` / `sessionPersistence` (and reads the host's
+  `connection` trust gate lazily), registers a browser-trust-fenced
   `/temp-workspace/api` route, and drives the cleanup at boot.
 - **Browser half** (`src/client.js` → `lib/client.js`) — injects a small icon
   button beside the sidebar "+ Add workspace" button; on click it calls the
@@ -82,7 +82,10 @@ dsh plugin --profile web add github:wjj-8283/dsh-temp-workspace#<ref>
 
 ## Settings → Plugins
 
-The plugin registers a card in **Settings → Plugins** (keyed by the settings
+The plugin registers its configuration in two places: on the plugin's own page
+in the **Plugin Manager** (sidebar → Plugins → this plugin; contributed through
+the `plugins.bundle.config` / `plugins.row.config` slots), and as a tab/card in
+**Settings → Plugins** (keyed by the settings
 namespace `dsh-temp-workspace`, persisted in `~/.dsh/settings.yaml`):
 
 | setting | values | default | meaning |
@@ -90,6 +93,7 @@ namespace `dsh-temp-workspace`, persisted in `~/.dsh/settings.yaml`):
 | `deleteMode` | `immediate` / `delayed` | `immediate` | when a temp workspace is removed on the next boot |
 | `deleteDelay` | seconds | `3600` | grace period before removal when `delayed` |
 | `confirmBeforeDelete` | on / off | `on` | ask the user before removing held workspaces |
+| `tempRoot` | absolute path (or `~/...`) | `''` → `<dsh-home>/temp-workspaces` | parent directory new temporary workspaces are created under; existing ones keep their location |
 
 - `confirmBeforeDelete` **on**: the host never auto-deletes at boot. It holds the
   workspaces and the browser shows a **confirm dialog** with two choices:

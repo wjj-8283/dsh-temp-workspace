@@ -2,6 +2,45 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.1.4] - 2026
+
+### Changed
+- The configuration now also lives inside the plugin's own page in the Plugin
+  Manager (sidebar → Plugins → this plugin): the same settings form is
+  registered into the 0.2.x `plugins.bundle.config` (keyed by the package name)
+  and `plugins.row.config` (keyed by `<package>#<rowId>`) slots, with a one-line
+  summary where the page lists rows. Settings → Plugins keeps the tab too.
+
+## [0.1.3] - 2026
+
+### Added
+- `tempRoot` setting (Settings → Plugins → Temporary Workspace): choose the
+  parent directory that NEW temporary workspaces are created under. Accepts an
+  absolute path or `~/...`; empty keeps the default `$DSH_HOME/temp-workspaces`.
+  The marker stays under the DSH home, so changing the setting never loses track
+  of temporary workspaces created earlier; orphan/residue sweeps follow every
+  root the install has used. Defaults are unchanged for existing users.
+
+## [0.1.2] - 2026
+
+### Fixed
+- Works on dsh 0.2.1 (and keeps 0.1.x working): the host half no longer injects
+  the removed `webRuntime` service (which left the whole entry pending, so
+  `/temp-workspace/api/create` answered 405 from the static fallback). Request
+  trust now defers to the host's own `connection.requestRejection` gate, which
+  accepts loopback, the listener's bind address and declared trusted hosts.
+- Session storage compatibility: `sessionPersistence.list()` snapshots
+  (`{ header, location }`), `stat()`-based artifact locations and the
+  per-generation `session.vN.jsonl[.zstd]` layout replace the removed
+  `locate()`/`root` API, so cleanup, orphan sweeps and permanent-keep migration
+  work again. Archived-id cleanup uses the public `unarchiveSession()`.
+- Restart now works when the Web UI is reached through a LAN address: the guard
+  uses the host gate plus a same-origin Origin instead of requiring a loopback
+  socket.
+- Browser half: New Session / folder picker use the 0.2.x `uiWorkspace` service
+  (with the old `workspaces` face as fallback), and the settings card registers
+  into the 0.2.x `settings.plugins.tab` slot (keeping the 0.1.x item slot).
+
 ## [0.1.0] - 2026
 
 ### Added

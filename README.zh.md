@@ -7,8 +7,8 @@
 ## 它是什么
 
 - **宿主半边**（`lib/index.js`）—— 一个 Cordis 插件，注入
-  `webServer` / `webRuntime` / `workspaceRegistry` / `sessionPersistence`、
-  `settings` 和 `loader`，注册受浏览器信任围墙保护的 `/temp-workspace/api` 路由，
+  `webServer` / `workspaceRegistry` / `sessionPersistence`（宿主信任门 `connection`
+  按请求懒读），注册受浏览器信任围墙保护的 `/temp-workspace/api` 路由，
   并在启动时驱动清理逻辑。
 - **浏览器半边**（`src/client.js` → `lib/client.js`）—— 在侧边栏「+ 添加工作区」
   按钮旁注入一个小图标；点击后调用宿主路由，并在新建的工作区里打开一个新对话。
@@ -54,7 +54,9 @@ dsh plugin --profile web add github:wjj-8283/dsh-temp-workspace#<ref>
 
 ## 设置 → 插件
 
-插件在 **设置 → 插件** 注册一张卡片（以设置命名空间 `dsh-temp-workspace` 为键，
+配置项会出现在两个地方：**插件页面**（侧边栏「插件」→ 点进本插件；通过
+`plugins.bundle.config` / `plugins.row.config` 槽位贡献），以及
+**设置 → 插件** 里的标签页/卡片（以设置命名空间 `dsh-temp-workspace` 为键，
 持久化在 `~/.dsh/settings.yaml`）：
 
 | 设置 | 取值 | 默认 | 含义 |
@@ -62,6 +64,7 @@ dsh plugin --profile web add github:wjj-8283/dsh-temp-workspace#<ref>
 | `deleteMode` | `immediate` / `delayed` | `immediate` | 下次启动时何时删除临时工作区 |
 | `deleteDelay` | 秒 | `3600` | `delayed` 模式下删除前的宽限期 |
 | `confirmBeforeDelete` | 开 / 关 | `开` | 删除前是否先询问用户 |
+| `tempRoot` | 绝对路径（或 `~/...`） | `''` → `<dsh-home>/temp-workspaces` | 新建临时工作区的父目录；已有临时工作区保持原位置 |
 
 - `confirmBeforeDelete` **开**：宿主启动时绝不自动删除，而是挂起这些工作区，
   浏览器弹出**确认对话框**，提供两个选项：
