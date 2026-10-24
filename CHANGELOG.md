@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.1.3] - 2026
+
+### Added
+- `tempRoot` setting (Settings → Plugins → Temporary Workspace): choose the
+  parent directory that NEW temporary workspaces are created under. Accepts an
+  absolute path or `~/...`; empty keeps the default `$DSH_HOME/temp-workspaces`.
+  The marker stays under the DSH home, so changing the setting never loses track
+  of temporary workspaces created earlier; orphan/residue sweeps follow every
+  root the install has used. Defaults are unchanged for existing users.
+
 ## [0.1.2] - 2026
 
 ### Fixed

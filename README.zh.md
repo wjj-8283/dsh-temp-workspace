@@ -62,6 +62,7 @@ dsh plugin --profile web add github:wjj-8283/dsh-temp-workspace#<ref>
 | `deleteMode` | `immediate` / `delayed` | `immediate` | 下次启动时何时删除临时工作区 |
 | `deleteDelay` | 秒 | `3600` | `delayed` 模式下删除前的宽限期 |
 | `confirmBeforeDelete` | 开 / 关 | `开` | 删除前是否先询问用户 |
+| `tempRoot` | 绝对路径（或 `~/...`） | `''` → `<dsh-home>/temp-workspaces` | 新建临时工作区的父目录；已有临时工作区保持原位置 |
 
 - `confirmBeforeDelete` **开**：宿主启动时绝不自动删除，而是挂起这些工作区，
   浏览器弹出**确认对话框**，提供两个选项：

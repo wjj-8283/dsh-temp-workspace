@@ -90,6 +90,7 @@ namespace `dsh-temp-workspace`, persisted in `~/.dsh/settings.yaml`):
 | `deleteMode` | `immediate` / `delayed` | `immediate` | when a temp workspace is removed on the next boot |
 | `deleteDelay` | seconds | `3600` | grace period before removal when `delayed` |
 | `confirmBeforeDelete` | on / off | `on` | ask the user before removing held workspaces |
+| `tempRoot` | absolute path (or `~/...`) | `''` → `<dsh-home>/temp-workspaces` | parent directory new temporary workspaces are created under; existing ones keep their location |
 
 - `confirmBeforeDelete` **on**: the host never auto-deletes at boot. It holds the
   workspaces and the browser shows a **confirm dialog** with two choices:

@@ -494,6 +494,7 @@ function apply(ctx) {
       deleteMode: 'immediate',
       deleteDelay: 3600,
       confirmBeforeDelete: true,
+      tempRoot: '',
       loading: true,
       saving: false,
       status: '',
@@ -512,6 +513,7 @@ function apply(ctx) {
             deleteMode: v?.deleteMode ?? current.deleteMode,
             deleteDelay: Number.isFinite(Number(v?.deleteDelay)) ? Number(v.deleteDelay) : current.deleteDelay,
             confirmBeforeDelete: v?.confirmBeforeDelete ?? current.confirmBeforeDelete,
+            tempRoot: typeof v?.tempRoot === 'string' ? v.tempRoot : current.tempRoot,
             status: data && data.ok === true ? '' : localeText('loadFail', 'Load failed'),
           }))
         })
@@ -544,6 +546,7 @@ function apply(ctx) {
             deleteMode: v?.deleteMode ?? current.deleteMode,
             deleteDelay: Number.isFinite(Number(v?.deleteDelay)) ? Number(v.deleteDelay) : current.deleteDelay,
             confirmBeforeDelete: v?.confirmBeforeDelete ?? current.confirmBeforeDelete,
+            tempRoot: typeof v?.tempRoot === 'string' ? v.tempRoot : current.tempRoot,
           }))
         })
         .catch(() => setState((current) => ({ ...current, saving: false, status: localeText('saveFail', 'Save failed') })))
@@ -568,6 +571,7 @@ function apply(ctx) {
             deleteMode: v?.deleteMode ?? 'immediate',
             deleteDelay: Number.isFinite(Number(v?.deleteDelay)) ? Number(v.deleteDelay) : 3600,
             confirmBeforeDelete: v?.confirmBeforeDelete ?? true,
+            tempRoot: typeof v?.tempRoot === 'string' ? v.tempRoot : '',
           }))
         })
         .catch(() => setState((current) => ({ ...current, saving: false, status: localeText('saveFail', 'Save failed') })))
@@ -600,12 +604,23 @@ function apply(ctx) {
                   onChange: (event) => setState((current) => ({ ...current, deleteDelay: Number(event.target.value) || 0, status: '' })),
                 }))
             : null),
+        react.createElement('label', { className: pathRowCss },
+          react.createElement('span', null, localeText('tempRootLabel', 'Temp workspace root directory')),
+          react.createElement('input', {
+            type: 'text',
+            value: state.tempRoot,
+            placeholder: localeText('tempRootPlaceholder', 'Default: ~/.dsh/temp-workspaces'),
+            spellCheck: false,
+            disabled: busy,
+            onChange: (event) => setState((current) => ({ ...current, tempRoot: event.target.value, status: '' })),
+          }),
+          react.createElement('span', { className: helpCss }, localeText('tempRootHelp', 'New temporary workspaces are created under this absolute path. Leave empty for the default. Existing temporary workspaces keep their current location.'))),
         react.createElement('label', { className: toggleCss },
           react.createElement('input', { type: 'checkbox', checked: state.confirmBeforeDelete, disabled: busy, onChange: (event) => setState((current) => ({ ...current, confirmBeforeDelete: event.target.checked, status: '' })) }),
           react.createElement('span', null, localeText('confirmLabel', 'Confirm before deleting'))),
         react.createElement('div', { className: helpCss }, localeText('confirmHelp', 'When on, a dialog asks before a held temp workspace is removed on the next restart.')),
         react.createElement('div', { className: actionsCss },
-          react.createElement('button', { type: 'button', className: btnCss, disabled: busy || !valid, onClick: () => update({ deleteMode: state.deleteMode, deleteDelay: state.deleteDelay, confirmBeforeDelete: state.confirmBeforeDelete }, localeText('saved', 'Saved')) }, localeText('save', 'Save')),
+          react.createElement('button', { type: 'button', className: btnCss, disabled: busy || !valid, onClick: () => update({ deleteMode: state.deleteMode, deleteDelay: state.deleteDelay, confirmBeforeDelete: state.confirmBeforeDelete, tempRoot: state.tempRoot }, localeText('saved', 'Saved')) }, localeText('save', 'Save')),
           react.createElement('button', { type: 'button', className: btnCss, disabled: busy, onClick: reset }, localeText('reset', 'Restore defaults'))),
         state.status ? react.createElement('div', { className: statusCss }, state.status) : null)
       : null)
@@ -759,6 +774,8 @@ function injectStyle() {
     '.dsh-temp-workspace-delay input{width:110px;box-sizing:border-box;border:1px solid var(--dsw-alias-border-l2);border-radius:7px;background:var(--dsw-alias-bg-module-platform);color:var(--dsw-alias-label-primary);font:inherit;padding:6px 10px}',
     '.dsh-temp-workspace-toggle{display:flex;align-items:center;gap:8px;color:var(--dsw-alias-label-secondary);font-size:12px;cursor:pointer}',
     '.dsh-temp-workspace-help{color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:1.5}',
+    '.dsh-temp-workspace-path{display:flex;flex-direction:column;gap:6px;color:var(--dsw-alias-label-secondary);font-size:12px}',
+    '.dsh-temp-workspace-path input{width:100%;box-sizing:border-box;border:1px solid var(--dsw-alias-border-l2);border-radius:7px;background:var(--dsw-alias-bg-module-platform);color:var(--dsw-alias-label-primary);font:inherit;padding:6px 10px}',
     '.dsh-temp-workspace-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}',
     '.dsh-temp-workspace-btn{height:30px;border:1px solid var(--dsw-alias-border-l2);border-radius:7px;background:transparent;color:var(--dsw-alias-label-secondary);font-size:12px;padding:0 12px;cursor:pointer}',
     '.dsh-temp-workspace-btn:hover:not(:disabled){color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover)}',
@@ -797,6 +814,9 @@ function localeText(key, fallbackEn, vars, localeRef) {
 const zhLocale = {
   name: '临时工作区',
   desc: '重启后何时、以及是否先确认再删除临时工作区',
+  tempRootLabel: '临时工作区根目录',
+  tempRootPlaceholder: '默认：~/.dsh/temp-workspaces',
+  tempRootHelp: '新的临时工作区会创建在这个绝对路径下；留空使用默认目录。已有的临时工作区保持当前位置，不受影响。',
   deleteModeLabel: '重启后何时删除',
   modeImmediate: '立即删除',
   modeDelayed: '延迟一段时间后删除',
@@ -827,6 +847,9 @@ const zhLocale = {
 const enLocale = {
   name: 'Temporary Workspace',
   desc: 'When and whether temp workspaces are deleted after a restart',
+  tempRootLabel: 'Temp workspace root directory',
+  tempRootPlaceholder: 'Default: ~/.dsh/temp-workspaces',
+  tempRootHelp: 'New temporary workspaces are created under this absolute path. Leave empty for the default. Existing temporary workspaces keep their current location.',
   deleteModeLabel: 'Delete after a restart',
   modeImmediate: 'Delete immediately',
   modeDelayed: 'Delete after a delay',
@@ -869,6 +892,7 @@ const radioCss = 'dsh-temp-workspace-radio'
 const delayCss = 'dsh-temp-workspace-delay'
 const toggleCss = 'dsh-temp-workspace-toggle'
 const helpCss = 'dsh-temp-workspace-help'
+const pathRowCss = 'dsh-temp-workspace-path'
 const actionsCss = 'dsh-temp-workspace-actions'
 const btnCss = 'dsh-temp-workspace-btn'
 const statusCss = 'dsh-temp-workspace-status'
