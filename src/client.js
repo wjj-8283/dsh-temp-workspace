@@ -6,9 +6,11 @@
 //      slot, so (like dsh-workspace-auto-approval) we decorate the live DOM
 //      with a MutationObserver — React re-renders drop our node and the
 //      observer puts it back.
-//   2. Register a Settings -> Plugins card (settings.plugin.item, keyed by the
-//      settings namespace) that lets the user choose delete timing (immediate
-//      vs. delayed + a delay) and whether to confirm before deleting.
+//   2. Register a standalone Settings page (the `settings.section` slot, i.e.
+//      its own entry in the Settings navigation) that lets the user choose
+//      delete timing (immediate vs. delayed + a delay) and whether to confirm
+//      before deleting. dsh 0.1.7 removed the old `settings.plugin.item` card
+//      slot, so the page no longer rides the Plugins section.
 //   3. On boot, if there are temporary workspaces held for confirmation and
 //      confirmBeforeDelete is on, show a confirm dialog before the host purges
 //      them. There is no generic "ask the human" API for a browser plugin, so
@@ -57,6 +59,27 @@ function apply(ctx) {
   const slots = ctx.get ? ctx.get('slots') : ctx.slots
   const locale = ctx.get ? ctx.get('locale') : ctx.locale
 
+  /**
+   * The service carrying workspace ACTIONS (`startSession`, `pickDirectory`).
+   *
+   * dsh 0.1.x kept those on the `workspaces` data service. dsh 0.2.x split the
+   * two: `workspaces` now only holds the data operations (create / rename /
+   * delete / list / pin), while the UI-facing service is `uiWorkspace`
+   * (startSession / pickDirectory / openSession / connectBlank / ...). Calling
+   * the old member on the data service quietly does nothing, so every call site
+   * goes through this resolver instead.
+   *
+   * Resolved at call time, not at apply() time: `uiWorkspace` belongs to the
+   * ui-workspace plugin, which may activate after this one — a value captured
+   * during apply() would be the data service and every action would be skipped.
+   * @returns {object | null} whichever service exposes the actions.
+   */
+  const workspaceActions = () => {
+    const uiWorkspace = typeof ctx.get === 'function' ? ctx.get('uiWorkspace') : ctx.uiWorkspace
+    if (uiWorkspace && typeof uiWorkspace.startSession === 'function') return uiWorkspace
+    return workspaces === undefined ? null : workspaces
+  }
+
   // Keep the module-level activeLocale in sync so every UI text follows the
   // user's language, and re-render the decorated DOM on a locale switch.
   const syncLocale = () => {
@@ -99,7 +122,14 @@ function apply(ctx) {
       if (workspaces && typeof workspaces.refresh === 'function') {
         await workspaces.refresh()
       }
-      if (workspaces) workspaces.startSession(workspace.workspaceId)
+      // `startSession` lives on `uiWorkspace` from dsh 0.2.x on (see
+      // workspaceActions), so resolve it here rather than on `workspaces`.
+      const actions = workspaceActions()
+      if (actions && typeof actions.startSession === 'function') {
+        actions.startSession(workspace.workspaceId)
+      } else {
+        console.warn('[temp-workspace] startSession unavailable; workspace created without opening a session')
+      }
     } catch (error) {
       console.error('[temp-workspace] create failed', error)
     }
@@ -212,9 +242,76 @@ function apply(ctx) {
       const parsed = (await res.json().catch(() => null)) || {}
       const value = unwrapValue(parsed)
       if (res.ok && parsed.ok === true && value && Array.isArray(value.entries)) {
-        tempEntries = value.entries.map((e) => ({ workspaceId: e.workspaceId, path: e.path }))
+        tempEntries = value.entries.map((e) => ({ workspaceId: e.workspaceId, path: e.path, missing: e.missing === true }))
       }
     } catch (e) { /* ignore */ }
+  }
+
+  /**
+   * Pair each rendered workspace row with the marker entry it belongs to.
+   *
+   * The row itself carries the answer: dsh 0.2.x stamps the workspace row with
+   * `data-row-key="workspace:<workspaceId>"` (session rows use `session:<id>`), so
+   * a button is bound to the workspace it is painted on no matter how the tree is
+   * filtered, re-sorted, collapsed or re-rendered. Pairing by index — the previous
+   * approach — silently mis-targeted a click whenever the row order and the marker
+   * order disagreed (e.g. a stale marker entry whose directory is already gone),
+   * which then failed with ENOENT against a directory that no longer existed.
+   *
+   * Entries flagged `missing` (their directory is gone) get no button at all: there
+   * is nothing to move, and offering the click only produces an error.
+   * @returns {Array<{ row: HTMLElement, entry: object }>} rows to decorate.
+   */
+  function pairRowsWithEntries() {
+    const byId = new Map(tempEntries.map((entry) => [entry.workspaceId, entry]))
+    const keyed = []
+    for (const row of document.querySelectorAll('[role="treeitem"][data-row-key]')) {
+      const key = row.getAttribute('data-row-key') || ''
+      if (!key.startsWith('workspace:')) continue // session rows and other tree items
+      const entry = byId.get(key.slice('workspace:'.length))
+      if (entry === undefined || entry.missing === true) continue
+      keyed.push({ row, entry })
+    }
+    if (keyed.length > 0) return keyed
+    return legacyPairs(byId)
+  }
+
+  /**
+   * Fallback for host builds that do not stamp `data-row-key`: walk the
+   * temp-titled rows in render order against the marker entries ranked into
+   * registry order.
+   * @param byId - marker entries keyed by workspace id.
+   * @returns {Array<{ row: HTMLElement, entry: object }>} best-effort rows.
+   */
+  function legacyPairs(byId) {
+    const order = registryWorkspaceOrder()
+    if (order.length === 0) return []
+    const rank = new Map(order.map((id, index) => [id, index]))
+    const entries = [...byId.values()]
+      .filter((entry) => rank.has(entry.workspaceId) && entry.missing !== true)
+      .sort((left, right) => rank.get(left.workspaceId) - rank.get(right.workspaceId))
+    const rows = []
+    for (const row of document.querySelectorAll('[role="treeitem"]')) {
+      const projText = row.querySelector('[class*="projectText"]')
+      const titleEl = projText !== null ? projText.querySelector('[class*="title"]') : null
+      const title = titleEl !== null ? (titleEl.textContent || '').trim() : ''
+      if (title === '临时工作区') rows.push(row)
+    }
+    const pairs = []
+    for (let i = 0; i < rows.length && i < entries.length; i += 1) pairs.push({ row: rows[i], entry: entries[i] })
+    return pairs
+  }
+
+  /** Workspace ids in the sidebar's own order, read from the workspace store. */
+  function registryWorkspaceOrder() {
+    try {
+      const store = workspaces && workspaces.list
+      const snapshot = store && typeof store.getSnapshot === 'function' ? store.getSnapshot() : undefined
+      const items = snapshot && Array.isArray(snapshot.items) ? snapshot.items : []
+      return items
+        .map((item) => (item && typeof item.workspaceId === 'string' ? item.workspaceId : undefined))
+        .filter((id) => id !== undefined)
+    } catch { return [] }
   }
 
   function injectRowButtons(force) {
@@ -225,24 +322,9 @@ function apply(ctx) {
       void fetchTempEntries()
     }
     if (tempEntries.length === 0) return
-    // All temp workspaces share the title "临时工作区", so the temp-titled rows
-    // correspond 1:1 (in registry/DOM order) to the marker entries. Inject the
-    // permanent-keep button next to each temp row's New Session (+).
     const keepTitle = localeText('keepTitle', 'Keep permanently (move out of temp)')
     const keepAria = localeText('keepAria', 'Keep permanently')
-    const rows = document.querySelectorAll('[role="treeitem"]')
-    const tempRows = []
-    for (const row of rows) {
-      // A workspace row's own title lives in its projectText block; a session
-      // row's title is also classed "title", so scope to the project text.
-      const projText = row.querySelector('[class*="projectText"]')
-      const titleEl = projText !== null ? projText.querySelector('[class*="title"]') : null
-      const title = titleEl !== null ? (titleEl.textContent || '').trim() : ''
-      if (title === '临时工作区') tempRows.push(row)
-    }
-    for (let i = 0; i < tempRows.length && i < tempEntries.length; i += 1) {
-      const row = tempRows[i]
-      const entry = tempEntries[i]
+    for (const { row, entry } of pairRowsWithEntries()) {
       const actions = row.querySelector('[class*="rowActions"]')
       if (actions === null) continue
       const existing = actions.querySelector('.dsh-temp-workspace-keep')
@@ -368,43 +450,187 @@ function apply(ctx) {
   // Permanent keep for one temp workspace: pick the destination folder, then ask
   // the host to move that workspace's files in and de-temp it.
   const doPermanentKeep = async (workspaceId) => {
-    if (!workspaces || typeof workspaces.pickDirectory !== 'function') {
-      console.error('[temp-workspace] pickDirectory unavailable')
+    let target
+    try {
+      target = await pickTargetDirectory()
+    } catch (error) {
+      if (!isPickerCancel(error)) {
+        console.error('[temp-workspace] permanent keep: picker failed', error)
+        const detail = error && error.message ? ': ' + error.message : ''
+        notifyActionFailed(localeText('moveFail', 'The Harness host could not move this workspace out of the temporary area. Nothing was changed.') + detail)
+      }
       return
     }
+    if (target === undefined) {
+      // No picker at all on this host build: the button used to be a silent
+      // no-op, so say out loud that nothing happened.
+      console.error('[temp-workspace] no directory picker on this host', { hasWorkspaces: workspaces !== undefined })
+      notifyActionFailed(localeText('pickFail', 'This Harness build exposes no directory picker, so a temporary workspace cannot be moved. Nothing was changed.'))
+      return
+    }
+    if (target === null || target === '') return // the user dismissed the picker
+    const payload = workspaceId !== undefined ? { target, workspaceId } : { target }
+    // The host copies the folder and rewrites/moves every session log while this
+    // request is open, so warn before it starts: quitting the host mid-flight is
+    // what would actually cost data. No progress bar — the move reports one
+    // result when it finishes.
+    const busy = mountBusyNotice()
+    let ok = false
+    let failure
+    let timedOut = false
     try {
-      const target = await workspaces.pickDirectory()
-      if (target === null || target === undefined || target === '') return
-      const payload = workspaceId !== undefined ? { target, workspaceId } : { target }
-      const ok = await post('/temp-workspace/api/permanentKeep', payload)
-      if (ok) { mountRestartNotice(); return }
-      console.error('[temp-workspace] permanent keep failed')
+      // The notice is non-dismissible and covers the whole screen, so it must not
+      // be able to outlive the request: without a ceiling a request that never
+      // answers would leave the UI permanently blocked ("the app is stuck").
+      // Hitting the ceiling never claims the move failed — the host may still be
+      // finishing it — it just hands the screen back.
+      ok = await withTimeout(post('/temp-workspace/api/permanentKeep', payload), PIN_TIMEOUT_MS)
     } catch (error) {
-      console.error('[temp-workspace] permanent keep failed', error)
+      if (error && error.code === TIMEOUT_CODE) timedOut = true
+      else failure = error
+    } finally {
+      try { busy.close() } catch (error) { console.error('[temp-workspace] busy notice close failed', error) }
+    }
+    if (ok) { mountRestartNotice(); return }
+    if (timedOut) {
+      console.error(`[temp-workspace] permanent keep got no answer within ${PIN_TIMEOUT_MS}ms`)
+      notifyActionFailed(localeText('moveTimeout', 'The Harness host has not reported back yet, so the workspace may still be moving. Give it a minute, then restart the Harness and check the workspace list. Do not quit the Harness while it is still moving.'))
+      return
+    }
+    console.error('[temp-workspace] permanent keep failed', failure ?? '')
+    const detail = failure && failure.message ? ': ' + failure.message : ''
+    notifyActionFailed(localeText('moveFail', 'The Harness host could not move this workspace out of the temporary area. Nothing was changed.') + detail)
+  }
+
+  /**
+   * Ask the host for a destination directory.
+   *
+   * Three sources, in order:
+   *   1. `globalThis.__DSH_DIRECTORY_PICKER__` — the desktop app's native folder
+   *      dialog (exposed by the Electron preload; the built-in
+   *      `dsh-client-ui-directory-picker-native` plugin uses the same global). It
+   *      needs no cordis inject and answers `null` when the dialog is dismissed.
+   *   2. `uiWorkspace.pickDirectory()` — dsh 0.2.x moved directory picking off the
+   *      `workspaces` data service onto the UI service; `ctx.get()` reads a
+   *      service without the inject guard.
+   *   3. `workspaces.pickDirectory()` — dsh 0.1.x, where the data service owned it.
+   *
+   * Never read `ctx.remote.directoryPicker` here: a namespaced remote requires
+   * `inject: ['remote.directoryPicker']` on this fiber, and cordis throws
+   * `cannot get property "remote.directoryPicker" without inject` otherwise.
+   * @returns {Promise<string | null | undefined>} path, null when dismissed,
+   *   undefined when this host exposes no picker at all.
+   */
+  const pickTargetDirectory = async () => {
+    const desktop = globalThis.__DSH_DIRECTORY_PICKER__
+    if (desktop && typeof desktop.pick === 'function') {
+      try {
+        const picked = await desktop.pick()
+        return picked === undefined || picked === null || picked === '' ? null : picked
+      } catch (error) {
+        // The desktop rejects picks from an unowned renderer/subframe, so a
+        // present-but-refusing global is not fatal: use the service-level
+        // picker below instead of failing the whole action.
+        console.warn('[temp-workspace] desktop directory picker refused; falling back to the service picker', error)
+      }
+    }
+    const actions = workspaceActions()
+    if (actions && typeof actions.pickDirectory === 'function') {
+      const picked = await actions.pickDirectory()
+      return picked === undefined || picked === null ? null : picked
+    }
+    return undefined
+  }
+
+  /**
+   * Tell the user an action failed instead of leaving a dead button.
+   * @param message - already-localized explanation.
+   */
+  function notifyActionFailed(message) {
+    try {
+      const dialog = mountDialog({
+        title: localeText('actionFailTitle', 'Action failed'),
+        description: message,
+        dismissible: true,
+        onMask: () => dialog.close(),
+        buttons: [{ label: localeText('ok', 'OK'), primary: true, onClick: () => dialog.close() }],
+      }, { autoFocusFirst: true })
+    } catch (error) {
+      console.error('[temp-workspace] failure notice failed', error)
     }
   }
 
-  // A short success dialog after a permanent keep, suggesting a restart.
-  function mountRestartNotice() {
-    // Non-dismissible: the user must restart for the migration to take effect,
-    // so the only action is "Restart now" — a real host restart.
-    mountDialog({
-      title: localeText('movedTitle', 'Workspace moved'),
-      description: localeText('movedDesc', 'The workspace(s) were moved out of the temporary area and are now permanent. For the migrated conversations to appear under the new workspace, restart the Harness now.'),
+  /**
+   * The "moving, do not quit" notice shown while a permanent keep is in flight.
+   *
+   * Non-dismissible with no buttons: the user cannot act on it, it only marks
+   * that the host is busy, and `doPermanentKeep` closes it when the request
+   * settles (success or failure). Deliberately no progress bar — the migration
+   * reports one result, so a fake percentage would just be noise.
+   * @returns {{ close: () => void }} the dialog handle.
+   */
+  function mountBusyNotice() {
+    // The overlay covers the screen and ignores mask/Escape, so it must never be
+    // the only way out: after BUSY_ESCAPE_MS it grows a "hide" button — a notice
+    // that can trap the user reads as a frozen app, which is worse than no notice.
+    // `doPermanentKeep` still closes it as soon as the host answers.
+    const Escapable = () => {
+      const [armed, setArmed] = react.useState(false)
+      react.useEffect(() => {
+        const timer = setTimeout(() => setArmed(true), BUSY_ESCAPE_MS)
+        return () => clearTimeout(timer)
+      }, [])
+      if (!armed) return null
+      return react.createElement('div', null,
+        react.createElement('button', {
+          type: 'button',
+          className: 'dsh-temp-workspace-btn',
+          onClick: () => { try { dialog.close() } catch (error) { console.error('[temp-workspace] busy notice close failed', error) } },
+        }, localeText('busyDismiss', 'Hide this notice (the move may still be running)')),
+        react.createElement('div', { className: 'dsh-temp-workspace-help' }, localeText('busyDismissHint', 'Hiding it does not cancel the move. Restart the Harness afterwards and check the workspace list.')))
+    }
+    const dialog = mountDialog({
+      title: localeText('movingTitle', 'Moving workspace…'),
+      description: localeText('movingDesc', 'The temporary workspace and its conversations are being moved. Do not quit DeepSeek Harness until this finishes — quitting now can leave the conversations half-migrated.'),
       dismissible: false,
-      buttons: [
-        {
-          label: localeText('restartNow', 'Restart now'),
-          primary: true,
-          onClick: () => {
-            // Real host-level restart (detached helper respawns the DSH entry),
-            // not just a page reload — so the registry re-indexes.
-            void fetch('/temp-workspace/api/restart', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })
-              .catch((error) => console.error('[temp-workspace] restart failed', error))
-          },
-        },
-      ],
+      buttons: [],
+      children: react.createElement(Escapable),
     })
+    return dialog
+  }
+
+  // A short notice after a permanent keep: the move only lands in the workspace
+  // list after the WHOLE process restarts, and the plugin cannot do that on the
+  // desktop app (the Electron shell owns the window; killing the web host inside it
+  // leaves the app unusable). So the notice explains how to restart by hand instead
+  // of offering a button that only half-works.
+  function mountRestartNotice() {
+    // Two sections; the platform-specific how-tos are SUB-items of the desktop
+    // section (they only restate where the app's own "quit" lives).
+    const steps = [
+      { text: localeText('restartWeb', 'Web version: quit the dsh process in the terminal, then start it again.'), depth: 0 },
+      { text: localeText('restartDesktop', 'Desktop version: fully quit the desktop app, then open it again.'), depth: 0 },
+      { text: localeText('restartWin', 'Windows: right-click the DSH icon in the tray area and choose Exit.'), depth: 1 },
+      { text: localeText('restartMac', 'macOS: press Command+Q, or right-click the icon in the Dock and choose Quit.'), depth: 1 },
+    ]
+    const dialog = mountDialog({
+      title: localeText('movedTitle', 'Workspace moved'),
+      description: localeText('movedDesc', 'The workspace has been moved out of the temporary area and is now permanent. Restart the Harness to see the migrated conversations under the new workspace:'),
+      dismissible: true,
+      onMask: () => dialog.close(),
+      children: react.createElement('div', null, ...steps.map((step, index) =>
+        react.createElement('div', {
+          key: index,
+          className: 'dsh-temp-workspace-help',
+          style: {
+            marginTop: index === 0 ? 0 : step.depth === 0 ? 8 : 4,
+            paddingLeft: step.depth === 0 ? 0 : 18,
+            fontSize: step.depth === 0 ? '12px' : '11px',
+            lineHeight: '1.6',
+          },
+        }, step.depth === 0 ? step.text : '· ' + step.text))),
+      buttons: [{ label: localeText('ok', 'OK'), primary: true, onClick: () => dialog.close() }],
+    }, { autoFocusFirst: true })
   }
 
   async function post(url, payload) {
@@ -432,14 +658,13 @@ function apply(ctx) {
   const retries = RETRY_DELAYS.map((delay) => setTimeout(() => { void confirmPending() }, delay))
   disposers.push(() => { for (const t of retries) clearTimeout(t) })
 
-  // ── Settings -> Plugins card ────────────────────────────────────────────
-  // Self-contained React card, keyed by the settings namespace, reading and
-  // writing its own settings via the host route (identical to the auto-approval
-  // card). It manages state directly rather than through the tab's inject face.
+  // ── Settings page (Settings -> Temporary workspace) ─────────────────────
+  // Self-contained React page, reading and writing its own settings via the
+  // host route. It manages state directly rather than through an inject face,
+  // so it needs nothing from the settings shell but a mount point.
   const SETTINGS_LIMIT = 24 * 3600 // max delay seconds (24h)
 
-  function SettingsCard() {
-    const [open, setOpen] = react.useState(false)
+  function TempWorkspaceSettingsPage() {
     const [state, setState] = react.useState({
       deleteMode: 'immediate',
       deleteDelay: 3600,
@@ -523,13 +748,10 @@ function apply(ctx) {
         .catch(() => setState((current) => ({ ...current, saving: false, status: localeText('saveFail', 'Save failed') })))
     }
 
-    return react.createElement('div', { className: cardCss },
-      react.createElement('button', { type: 'button', className: headCss, onClick: () => setOpen((value) => !value) },
-        react.createElement('span', { className: headTextCss },
-          react.createElement('span', { className: nameCss }, localeText('name', 'Temporary Workspace')),
-          react.createElement('span', { className: descCss }, localeText('desc', 'When and whether temp workspaces are deleted after a restart'))),
-        react.createElement('span', { className: chevronCss + (open ? ' ' + chevronOpenCss : '') }, '▾')),
-      open ? react.createElement('div', { className: bodyCss },
+    return react.createElement('div', { className: pageCss },
+      react.createElement('h2', { className: headingCss }, localeText('name', 'Temporary Workspace')),
+      react.createElement('p', { className: introCss }, localeText('desc', 'When and whether temp workspaces are deleted after a restart')),
+      react.createElement('div', { className: panelCss },
         react.createElement('fieldset', { className: fieldsetCss },
           react.createElement('legend', { className: labelCss }, localeText('deleteModeLabel', 'Delete after restart')),
           react.createElement('label', { className: radioCss },
@@ -557,17 +779,20 @@ function apply(ctx) {
         react.createElement('div', { className: actionsCss },
           react.createElement('button', { type: 'button', className: btnCss, disabled: busy || !valid, onClick: () => update({ deleteMode: state.deleteMode, deleteDelay: state.deleteDelay, confirmBeforeDelete: state.confirmBeforeDelete }, localeText('saved', 'Saved')) }, localeText('save', 'Save')),
           react.createElement('button', { type: 'button', className: btnCss, disabled: busy, onClick: reset }, localeText('reset', 'Restore defaults'))),
-        state.status ? react.createElement('div', { className: statusCss }, state.status) : null)
-      : null)
+        state.status ? react.createElement('div', { className: statusCss }, state.status) : null))
   }
 
   if (slots) {
-    ctx.effect(() => slots.inject('settings.plugin.item', () => slots.register({
-      name: 'settings.plugin.item',
-      key: SETTINGS_NS,
-      id: 'dsh-temp-workspace-settings',
-      label: localeText('name', 'Temporary Workspace'),
-    }, SettingsCard)), 'dsh-temp-workspace: settings card')
+    // dsh 0.1.7 dropped the per-namespace `settings.plugin.item` card slot; the
+    // supported seat for a plugin-owned settings UI is now its own page in the
+    // Settings shell (`settings.section`, a root list declared by the shell).
+    // `slots.inject` runs the registration only once that declaration exists.
+    ctx.effect(() => slots.inject('settings.section', () => slots.register({
+      name: 'settings.section',
+      id: SETTINGS_NS,
+      order: 60,
+      label: () => localeText('name', 'Temporary Workspace'),
+    }, TempWorkspaceSettingsPage)), 'dsh-temp-workspace: settings page')
   }
 
   // ── cleanup on plugin unload ────────────────────────────────────────────
@@ -603,7 +828,11 @@ function mountDialog(options, settings) {
     closed = true
     // Remove the Escape listener once closed.
     if (onKey) window.removeEventListener('keydown', onKey)
-    root.unmount()
+    // A React unmount can throw (an in-flight concurrent render, or a root already
+    // torn down by a page-level error). Swallowing it keeps the OVERLAY from
+    // surviving as an invisible full-screen blocker — the exact way a dialog turns
+    // into "the app is stuck".
+    try { root.unmount() } catch (error) { console.error('[temp-workspace] dialog unmount failed', error) }
     host.remove()
     if (options.onClose) { try { options.onClose() } catch { /* noop */ } }
   }
@@ -675,6 +904,47 @@ function unwrapValue(data) {
   return value
 }
 
+// A dismissed directory picker is not a failure. `uiWorkspace.pickDirectory()`
+// throws on `{ ok: false }` and drops the error code into the message, so match
+// the code first and fall back to the words a cancelled pick produces.
+function isPickerCancel(error) {
+  if (error === undefined || error === null) return true
+  const code = String(error.code ?? '').toLowerCase()
+  const message = String(error.message ?? error ?? '').toLowerCase()
+  const hit = (text) => text.includes('cancel') || text.includes('dismiss') || text.includes('abort')
+  return hit(code) || hit(message)
+}
+
+// How long a permanent keep may hold the screen before the client gives up
+// waiting. The move itself is fast (tens of milliseconds for a folder without
+// large contents), so anything near this ceiling means something is wedged.
+const PIN_TIMEOUT_MS = 90_000
+const TIMEOUT_CODE = 'temp-workspace-timeout'
+// How long the "moving" overlay stays fully locked before it offers a way out.
+const BUSY_ESCAPE_MS = 10_000
+
+/**
+ * Settle `promise`, but reject with a tagged timeout error once `ms` elapses.
+ * The wrapped promise is NOT cancelled — the host keeps working; the caller only
+ * stops waiting on it.
+ * @param promise - the in-flight operation.
+ * @param ms - ceiling in milliseconds.
+ * @returns the operation's value.
+ */
+function withTimeout(promise, ms) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      const error = new Error(`no answer from the host within ${Math.round(ms / 1000)}s`)
+      error.code = TIMEOUT_CODE
+      reject(error)
+    }, ms)
+    promise.then(
+      (value) => { clearTimeout(timer); resolve(value) },
+      (error) => { clearTimeout(timer); reject(error) },
+    )
+  })
+}
+
 // ── CSS injection (card + modal) ────────────────────────────────────────────
 let styleInjected = false
 function injectStyle() {
@@ -683,15 +953,11 @@ function injectStyle() {
   const style = document.createElement('style')
   style.dataset.plugin = SETTINGS_NS
   style.textContent = [
-    // settings card, matching the framework's dsw-alias design tokens
-    '.dsh-temp-workspace-card{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);border-radius:12px;overflow:hidden}',
-    '.dsh-temp-workspace-head{appearance:none;width:100%;font:inherit;color:inherit;text-align:left;cursor:pointer;background:transparent;border:0;display:flex;align-items:center;gap:12px;padding:14px 16px}',
-    '.dsh-temp-workspace-head-text{display:flex;flex:1;min-width:0;flex-direction:column;gap:4px}',
-    '.dsh-temp-workspace-name{color:var(--dsw-alias-label-primary);font-size:15px;font-weight:600;line-height:1.4}',
-    '.dsh-temp-workspace-desc{color:var(--dsw-alias-label-tertiary);font-size:13px;line-height:1.5}',
-    '.dsh-temp-workspace-chevron{color:var(--dsw-alias-label-tertiary);flex:none;transition:transform .16s}',
-    '.dsh-temp-workspace-chevron-open{transform:rotate(180deg)}',
-    '.dsh-temp-workspace-body{border-top:1px solid var(--dsw-alias-border-l2);padding:14px 16px;display:flex;flex-direction:column;gap:14px}',
+    // settings page, matching the framework's dsw-alias design tokens
+    '.dsh-temp-workspace-page{display:flex;flex-direction:column;width:100%;max-width:760px;gap:12px;color:var(--dsw-alias-label-primary)}',
+    '.dsh-temp-workspace-heading{margin:0;font-size:18px;font-weight:600}',
+    '.dsh-temp-workspace-intro{color:var(--dsw-alias-label-tertiary);margin:0;font-size:13px}',
+    '.dsh-temp-workspace-panel{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:14px}',
     '.dsh-temp-workspace-fieldset{border:0;padding:0;margin:0;display:flex;flex-direction:column;gap:8px}',
     '.dsh-temp-workspace-label{color:var(--dsw-alias-label-primary);font-size:13px;font-weight:600}',
     '.dsh-temp-workspace-radio{display:flex;align-items:center;gap:8px;color:var(--dsw-alias-label-secondary);font-size:12px;cursor:pointer}',
@@ -757,11 +1023,23 @@ const zhLocale = {
   tmpKeep: '临时保留',
   close: '关闭',
   movedTitle: '工作区已移动',
-  movedDesc: '这些工作区已移出临时区域并转为永久工作区。为了让迁移的对话在新工作区下显示，请立即重启 Harness。',
-  restartNow: '立即重启',
+  movedDesc: '该工作区已移出临时区域并转为永久工作区。要让迁移的对话在新工作区下显示，请重启 Harness：',
+  movingTitle: '正在迁移工作区…',
+  movingDesc: '正在搬移临时工作区及其对话。完成前请不要退出 DeepSeek Harness——中途退出可能让对话只迁移了一半。',
+  restartWeb: 'Web 版：在终端里退出 dsh 进程，然后重新打开。',
+  restartDesktop: '桌面版：彻底退出桌面端，然后重新打开。',
+  restartWin: 'Windows：右键托盘区的 DSH 图标 → 退出。',
+  restartMac: 'macOS：直接按 Command+Q，或右键 Dock 栏里的图标 → 退出。',
   iconTitle: '临时工作区',
   keepTitle: '永久保留（移出临时区）',
   keepAria: '永久保留',
+  actionFailTitle: '操作失败',
+  pickFail: '当前 Harness 版本没有可用的目录选择器，无法把临时工作区移出临时区。未做任何改动。',
+  moveFail: '宿主未能把这个工作区移出临时区。未做任何改动。',
+  moveTimeout: '宿主还没有回报结果，迁移可能仍在继续。请等一分钟再重启 Harness，到侧栏确认工作区是否已出现；在它完成前不要退出 Harness。',
+  busyDismiss: '关闭提示（迁移可能仍在进行）',
+  busyDismissHint: '关掉提示不会取消迁移。之后重启 Harness，再看侧栏里的工作区列表。',
+  ok: '好的',
 }
 
 const enLocale = {
@@ -787,22 +1065,30 @@ const enLocale = {
   tmpKeep: 'Keep temporarily',
   close: 'Close',
   movedTitle: 'Workspace moved',
-  movedDesc: 'The workspace(s) were moved out of the temporary area and are now permanent. For the migrated conversations to appear under the new workspace, restart the Harness now.',
-  restartNow: 'Restart now',
+  movedDesc: 'The workspace has been moved out of the temporary area and is now permanent. Restart the Harness to see the migrated conversations under the new workspace:',
+  movingTitle: 'Moving workspace…',
+  movingDesc: 'The temporary workspace and its conversations are being moved. Do not quit DeepSeek Harness until this finishes — quitting now can leave the conversations half-migrated.',
+  restartWeb: 'Web version: quit the dsh process in the terminal, then start it again.',
+  restartDesktop: 'Desktop version: fully quit the desktop app, then open it again.',
+  restartWin: 'Windows: right-click the DSH icon in the tray area and choose Exit.',
+  restartMac: 'macOS: press Command+Q, or right-click the icon in the Dock and choose Quit.',
   iconTitle: 'Temporary workspace',
   keepTitle: 'Keep permanently (move out of temp)',
   keepAria: 'Keep permanently',
+  actionFailTitle: 'Action failed',
+  pickFail: 'This Harness build exposes no directory picker, so a temporary workspace cannot be moved. Nothing was changed.',
+  moveFail: 'The Harness host could not move this workspace out of the temporary area. Nothing was changed.',
+  moveTimeout: 'The Harness host has not reported back yet, so the workspace may still be moving. Give it a minute, then restart the Harness and check the workspace list. Do not quit the Harness while it is still moving.',
+  busyDismiss: 'Hide this notice (the move may still be running)',
+  busyDismissHint: 'Hiding it does not cancel the move. Restart the Harness afterwards and check the workspace list.',
+  ok: 'OK',
 }
 
-// ── inline CSS (class strings for the card, keyed off the sidebars' css vars) ──
-const cardCss = 'dsh-temp-workspace-card'
-const headCss = 'dsh-temp-workspace-head'
-const headTextCss = 'dsh-temp-workspace-head-text'
-const nameCss = 'dsh-temp-workspace-name'
-const descCss = 'dsh-temp-workspace-desc'
-const chevronCss = 'dsh-temp-workspace-chevron'
-const chevronOpenCss = 'dsh-temp-workspace-chevron-open'
-const bodyCss = 'dsh-temp-workspace-body'
+// ── inline CSS (class strings for the page, keyed off the sidebars' css vars) ──
+const pageCss = 'dsh-temp-workspace-page'
+const headingCss = 'dsh-temp-workspace-heading'
+const introCss = 'dsh-temp-workspace-intro'
+const panelCss = 'dsh-temp-workspace-panel'
 const fieldsetCss = 'dsh-temp-workspace-fieldset'
 const labelCss = 'dsh-temp-workspace-label'
 const radioCss = 'dsh-temp-workspace-radio'

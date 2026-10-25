@@ -12,14 +12,15 @@ workspace **and the workspace itself** — the temp workspace leaves no trace.
 ## What it is
 
 - **Host half** (`lib/index.js`) — a Cordis plugin that injects
-  `webServer` / `webRuntime` / `workspaceRegistry` / `sessionPersistence`,
-  `settings` and `loader`, registers a browser-trust-fenced
+  `webServer` / `workspaceRegistry` / `sessionPersistence` (the trusted-authority
+  list is read from the web app's `webStartup` service when present, never as a
+  hard dependency), registers a browser-trust-fenced
   `/temp-workspace/api` route, and drives the cleanup at boot.
 - **Browser half** (`src/client.js` → `lib/client.js`) — injects a small icon
   button beside the sidebar "+ Add workspace" button; on click it calls the
   host route and opens a new Conversation in the created workspace. It also
-  registers a **Settings → Plugins** card and, when the setting is enabled, a
-  confirm dialog at boot.
+  registers a **Settings → Temporary workspace** page and, when the setting is
+  enabled, a confirm dialog at boot.
 
 ## Installation
 
@@ -80,10 +81,13 @@ dsh plugin --profile web add github:wjj-8283/dsh-temp-workspace#<ref>
 > `node build.mjs --watch` (see [Dev loop](#dev-loop)) — or install from a local
 > checkout instead (see [Wiring into the profile](#wiring-into-the-profile)).
 
-## Settings → Plugins
+## Settings → Temporary workspace
 
-The plugin registers a card in **Settings → Plugins** (keyed by the settings
-namespace `dsh-temp-workspace`, persisted in `~/.dsh/settings.yaml`):
+The plugin registers its **own page** in the Settings navigation (the
+`settings.section` slot, id `dsh-temp-workspace`) with the three settings below.
+The values live in the profile patch, on the Loader entry `dsh-temp-workspace`'s
+`config` (dsh 0.1.7 removed both the old `settings.plugin.item` card slot and
+`~/.dsh/settings.yaml`):
 
 | setting | values | default | meaning |
 | --- | --- | --- | --- |
@@ -102,16 +106,24 @@ namespace `dsh-temp-workspace`, persisted in `~/.dsh/settings.yaml`):
 **Permanent keep** is not in the boot dialog — it has its own button.
 Each temp workspace row in the sidebar (titled "临时工作区", i.e. "Temporary Workspace") shows a small **pin**
 button next to its "＋" (New Session). Clicking it picks a destination folder (the
-OS folder picker via `ctx.workspaces.pickDirectory()`). The temp workspace's files
+OS folder picker: the desktop app's `__DSH_DIRECTORY_PICKER__` bridge when present,
+otherwise `uiWorkspace.pickDirectory()` on dsh 0.2.x or
+`ctx.workspaces.pickDirectory()` on 0.1.x).
+The temp workspace's files
 are moved **directly into that folder** (no extra "临时工作区" subfolder is
 created), the folder itself becomes the permanent workspace, and its **folder name
 is used as the workspace title**. The workspace's **conversations are migrated
 too**: each session log's header `cwd` is rewritten to the folder path and its log
-directory is moved into the new cwd's projectKey slot. After it succeeds, a
-**non-dismissible** dialog appears with a **"Restart now"** button that
-triggers a **real host-level restart** (a detached helper respawns the exact DSH
-invocation — the same mechanism `dsh-market` uses for plugin updates) so the
-registry re-indexes and the migrated conversations appear under the new workspace.
+directory is moved into the new cwd's projectKey slot. While the move runs, a
+**"Moving workspace…" notice** is on screen (no progress bar — it only says not to
+quit the Harness mid-flight; after 10 s it offers a way to hide itself). After it
+succeeds, a dialog explains **how to restart by hand** — there is no in-app restart
+button, because the desktop app cannot restart its own host process:
+
+- web version: quit the `dsh` process in the terminal, then start it again;
+- desktop version: fully quit the desktop app and open it again
+  - Windows: tray icon → right-click → Exit;
+  - macOS: Command+Q, or right-click the Dock icon → Quit.
 - `confirmBeforeDelete` **off**: deletion is automatic — immediately on boot, or
   after `deleteDelay` seconds when `deleteMode` is `delayed`.
 
@@ -213,7 +225,7 @@ Reads accept `GET`, mutations `POST`.
 | `POST confirm` | `{ ok, deleted }` | user confirmed — delete the held set |
 | `POST keep` | `{ ok, kept }` | temporary keep — leave the held set alone (still temp) |
 | `POST permanentKeep` | `{ ok, moved }` | `{ target, workspaceId? }` — use `target` (picked folder) directly and de-temp that workspace (or all held when `workspaceId` omitted) |
-| `POST restart` | `{ restarting, pid, helperPid }` | real host restart (same-origin loopback only) |
+| `POST restart` | `{ restarting, pid, helperPid }` | real host restart (same-origin loopback only). **No UI calls this any more** — the desktop app cannot restart its own host, so the keep dialog explains the manual restart instead |
 
 ## Notes / limits
 
@@ -234,14 +246,22 @@ Reads accept `GET`, mutations `POST`.
   dialog is rendered by the plugin itself as a lightweight inline-styled overlay
   through its own `react-dom/client` root (no dependency on the primitives'
   CSS-module scope, so it always shows).
-- **Permanent Keep** requires the `native` directory-picker capability
-  (`ctx.workspaces.pickDirectory()`); on a remote/non-native deployment that
-  picker is unavailable and the button is disabled.
+- **Permanent Keep** needs a directory picker: the desktop app's
+  `__DSH_DIRECTORY_PICKER__` bridge, `uiWorkspace.pickDirectory()` (0.2.x), or
+  `ctx.workspaces.pickDirectory()` (0.1.x). `ctx.remote.directoryPicker` is
+  deliberately **not** used — a namespaced remote needs its own `inject` entry
+  and cordis throws `cannot get property "remote.directoryPicker" without
+  inject`. When no picker is available the plugin says so in a dialog instead of
+  leaving a dead button.
 - Conversation migration rewrites only the **header frame** of each session log
   (a `.jsonl.zstd` file is a concatenation of independently-compressed
   Zstandard frames — frame 0 is the header line carrying `cwd`, the rest are
   the event batches). The header frame's `cwd` is rewritten and every event
-  frame is preserved byte-for-byte, so no conversation content is lost.
+  frame is preserved byte-for-byte, so no conversation content is lost. dsh
+  0.2.x names the artifact after its format generation (`session.v4.jsonl.zstd`)
+  and keeps earlier generations beside it; every generation in the session
+  directory is carried over, and a log whose frame layout cannot be parsed is
+  copied verbatim rather than rewritten.
 - A `cwd` is immutable in the DSH session header, hence the rewrite approach.
   The DSH workspace registry's session→workspace **grouping (`bootstrap`) only
   runs once on the first boot**; later boots only rebuild the id→cwd index and

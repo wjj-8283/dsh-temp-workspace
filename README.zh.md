@@ -7,12 +7,12 @@
 ## 它是什么
 
 - **宿主半边**（`lib/index.js`）—— 一个 Cordis 插件，注入
-  `webServer` / `webRuntime` / `workspaceRegistry` / `sessionPersistence`、
-  `settings` 和 `loader`，注册受浏览器信任围墙保护的 `/temp-workspace/api` 路由，
-  并在启动时驱动清理逻辑。
+  `webServer` / `workspaceRegistry` / `sessionPersistence`（可信授权列表改为
+  按需读取 web app 的 `webStartup` 服务，不作为硬依赖），注册受浏览器信任围墙保护的
+  `/temp-workspace/api` 路由，并在启动时驱动清理逻辑。
 - **浏览器半边**（`src/client.js` → `lib/client.js`）—— 在侧边栏「+ 添加工作区」
   按钮旁注入一个小图标；点击后调用宿主路由，并在新建的工作区里打开一个新对话。
-  它还注册了一张 **设置 → 插件** 卡片，并在设置开启时于启动阶段弹确认对话框。
+  它还注册了一个 **设置 → 临时工作区** 独立页面，并在设置开启时于启动阶段弹确认对话框。
 
 ## 安装方式
 
@@ -24,7 +24,7 @@
 dsh plugin --profile web add @wjj-8283/dsh-temp-workspace
 ```
 
-`dsh plugin … add` 会把该 spec 转发给 profile 目录里的 pnpm，并代为合并 `dsh.profile.bundles`。因为清单声明了 `dsh.bundle.patch`，包会自动加入 Loader 层栈，下次启动 `dsh web` 时宿主把它组合为 Loader 条目、注册 `/temp-workspace/api` 路由、设置卡片进入 `__DSH_BOOT__`。
+`dsh plugin … add` 会把该 spec 转发给 profile 目录里的 pnpm，并代为合并 `dsh.profile.bundles`。因为清单声明了 `dsh.bundle.patch`，包会自动加入 Loader 层栈，下次启动 `dsh web` 时宿主把它组合为 Loader 条目、注册 `/temp-workspace/api` 路由，客户端插件（含设置页面）进入 `__DSH_BOOT__`。
 
 ### 从 GitHub 安装
 
@@ -35,7 +35,7 @@ dsh plugin --profile web add @wjj-8283/dsh-temp-workspace
 dsh plugin --profile web add github:wjj-8283/dsh-temp-workspace
 ```
 
-因为清单声明了 `dsh.bundle.patch`，add 会把该包自动追加到 `dsh.profile.bundles`，下次启动 `dsh web` 时宿主就把它组合为 Loader 条目、注册 `/temp-workspace/api` 路由、设置卡片进入 `__DSH_BOOT__`。
+因为清单声明了 `dsh.bundle.patch`，add 会把该包自动追加到 `dsh.profile.bundles`，下次启动 `dsh web` 时宿主就把它组合为 Loader 条目、注册 `/temp-workspace/api` 路由，客户端插件（含设置页面）进入 `__DSH_BOOT__`。
 
 若想自己驱动 pnpm，可在 profile 目录里执行同一 spec：
 
@@ -52,10 +52,12 @@ dsh plugin --profile web add github:wjj-8283/dsh-temp-workspace#<ref>
 
 > 构建后的客户端 bundle（`lib/client.js`）已提交在仓库里，所以 git 安装不需要构建步骤。要改它，克隆仓库后用 `node build.mjs --watch`（见[开发循环](#开发循环)），或改为从本地 checkout 安装（见[接入 profile](#接入-profile)）。
 
-## 设置 → 插件
+## 设置 → 临时工作区
 
-插件在 **设置 → 插件** 注册一张卡片（以设置命名空间 `dsh-temp-workspace` 为键，
-持久化在 `~/.dsh/settings.yaml`）：
+插件在 **设置导航** 里注册了自己的**独立页面**（`settings.section` 插槽，id 为
+`dsh-temp-workspace`），页面里是下面三个设置项。取值存放在 profile patch 中 Loader 条目
+`dsh-temp-workspace` 的 `config` 里（dsh 0.1.7 起旧的 `settings.plugin.item` 卡片插槽与
+`~/.dsh/settings.yaml` 均已移除）：
 
 | 设置 | 取值 | 默认 | 含义 |
 | --- | --- | --- | --- |
@@ -72,13 +74,19 @@ dsh plugin --profile web add github:wjj-8283/dsh-temp-workspace#<ref>
 
 **永久保留**不在启动确认弹窗里——它有**自己的按钮**。侧边栏里每个临时工作区行
 （标题「临时工作区」）在其「＋」(New Session) 旁边有一个**图钉**按钮。点击后选取一个
-目标文件夹（通过 `ctx.workspaces.pickDirectory()` 的系统目录选择器）。临时工作区的文件会
+目标文件夹（系统目录选择器：桌面端有 `__DSH_DIRECTORY_PICKER__` 桥时直接用它，否则
+dsh 0.2.x 走 `uiWorkspace.pickDirectory()`，0.1.x 走 `ctx.workspaces.pickDirectory()`）。临时工作区的文件会
 **直接移进该文件夹**（不会额外创建「临时工作区」子文件夹），该文件夹本身成为永久工作区，
 并用**其文件夹名作为工作区标题**。同时**迁移对话**：把每个会话日志头行的 `cwd` 改写为该
-文件夹路径，并把日志目录移到新 `cwd` 的 projectKey 槽位。成功后弹出一个**不可关闭**的
-对话框，带 **「立即重启」** 按钮——它触发**真正的宿主级重启**（一个脱离的辅助进程按原
-DSH 启动命令重新拉起，机制与 `dsh-market` 更新插件时一致），让注册表重新索引、迁移的对话
-出现在新工作区下。
+文件夹路径，并把日志目录移到新 `cwd` 的 projectKey 槽位。迁移进行期间会显示一个
+**「正在迁移工作区…」提示**（没有进度条，只提醒不要中途退出 Harness；10 秒后会给出关闭入口）。
+成功后弹出的对话框只说明**如何手动重启**——没有「立即重启」按钮，因为桌面端无法重启自己的
+宿主进程：
+
+- Web 版：在终端里退出 `dsh` 进程，然后重新打开；
+- 桌面版：彻底退出桌面端再重新打开
+  - Windows：右键托盘区的 DSH 图标 → 退出；
+  - macOS：直接按 Command+Q，或右键 Dock 栏里的图标 → 退出。
 - `confirmBeforeDelete` **关**：自动删除——启动时立即执行，或在 `deleteMode = 'delayed'`
   时等待 `deleteDelay` 秒后执行。
 
@@ -122,7 +130,7 @@ temp-workspace-plugin/
   package.json       name, dsh.bundle.patch + dsh.client, exports
   cordis.patch.yml   把该插件插入为宿主 Loader 条目
   lib/index.js       节点半边 —— /temp-workspace/api 路由 + 设置 + 启动清理
-  src/client.js      浏览器半边源码（图标 + 设置卡片 + 确认弹窗）
+  src/client.js      浏览器半边源码（图标 + 设置页面 + 确认弹窗）
   lib/client.js      构建后的浏览器半边（生成文件，勿改）
   build.mjs          把 src/client.js 包装 -> lib/client.js（HMR watch）
 ```
@@ -145,7 +153,7 @@ dsh plugin --profile web add /path/to/dsh-temp-workspace
 ```
 
 这会把它加入 `dsh.profile.bundles`。下次启动 `dsh web` 时宿主组合该行、
-注册 `/temp-workspace/api` 路由、设置卡片进入 `__DSH_BOOT__`，并运行启动清理/确认流程。
+注册 `/temp-workspace/api` 路由，客户端插件（含设置页面）进入 `__DSH_BOOT__`，并运行启动清理/确认流程。
 
 ## API（`/temp-workspace/api/<method>`）
 
@@ -162,7 +170,7 @@ dsh plugin --profile web add /path/to/dsh-temp-workspace
 | `POST confirm` | `{ ok, deleted }` | 用户确认——删除被挂起的集合 |
 | `POST keep` | `{ ok, kept }` | 临时保留——不动作（仍为临时） |
 | `POST permanentKeep` | `{ ok, moved }` | `{ target, workspaceId? }` —— 把 `target`（所选文件夹）直接作为新工作区并去临时化；带 `workspaceId` 时只移动该工作区（省略则移动全部被挂起的） |
-| `POST restart` | `{ restarting, pid, helperPid }` | 真正的宿主重启（仅限同源 loopback） |
+| `POST restart` | `{ restarting, pid, helperPid }` | 真正的宿主重启（仅限同源 loopback）。**界面已不再调用**——桌面端无法重启自己的宿主，永久保留后的对话框改为说明手动重启步骤 |
 
 ## 说明 / 局限
 
@@ -176,11 +184,16 @@ dsh plugin --profile web add /path/to/dsh-temp-workspace
 - 临时工作区的目录位于 DSH home（`~/.dsh/temp-workspaces`），不在你的常规项目文件夹里。
 - 浏览器插件没有通用的「询问用户」API，因此确认弹窗由插件自绘（轻量内联样式遮罩），
   通过自己的 `react-dom/client` root 渲染（不依赖 primitives 的 CSS-module 作用域，所以必定显示）。
-- **永久保留**需要 `native` 目录选择器能力（`ctx.workspaces.pickDirectory()`）；
-  在远程/非 native 部署下该选择器不可用，按钮会被禁用。
+- **永久保留**需要目录选择器：优先桌面端的 `__DSH_DIRECTORY_PICKER__` 桥，其次
+  `uiWorkspace.pickDirectory()`（0.2.x），最后 `ctx.workspaces.pickDirectory()`（0.1.x）。
+  这里**刻意不用** `ctx.remote.directoryPicker`——命名空间化的 remote 需要单独声明
+  `inject`，否则 cordis 会抛 `cannot get property "remote.directoryPicker" without inject`。
+  都不可用时插件会弹窗明确告知，而不是留下一个点了没反应的按钮。
 - 对话迁移只改写每个会话日志的**头帧**（`.jsonl.zstd` 是一串独立压缩的 Zstandard 帧
   连接而成——帧 0 是带 `cwd` 的头行，其余是事件批次）。头帧的 `cwd` 被改写，每个事件帧
-  逐字节保留，因此不会丢失任何对话内容。
+  逐字节保留，因此不会丢失任何对话内容。dsh 0.2.x 的日志文件名带格式代次
+  （`session.v4.jsonl.zstd`），同目录下还留着更早的代次；迁移会带上该会话目录里的**每一个
+  代次**，而帧结构无法解析的日志会被原样拷贝而不是重写。
 - DSH 会话头中的 `cwd` 不可变，故采用改写方式。DSH 工作区注册表的「会话→工作区分组」
   （`bootstrap`）**只在第一次启动时运行一次**；之后的启动只会重建 id→cwd 索引，不会把
   迁移后的会话加进新工作区的 `sessionIds`。为避免迁移的对话最终变成**未分组**，插件在
@@ -195,6 +208,6 @@ dsh plugin --profile web add /path/to/dsh-temp-workspace
 
 ## 界面语言
 
-所有界面文案（图标按钮、行内“永久保留”按钮、设置卡片、确认/重启弹窗）都提供**中文与英文**
+所有界面文案（图标按钮、行内“永久保留”按钮、设置页面、确认/重启弹窗）都提供**中文与英文**
 两套字典，并跟随 DSH 的激活语言自动切换（`ctx.locale` + `locale.subscribe`），语言切换时
 已注入的按钮文案也会刷新。
